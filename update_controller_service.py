@@ -1,49 +1,29 @@
-
-#!/usr/local/bin/python3
+import time
 import requests
 import json
-import time
-import urllib2
+import urllib
 import base64
 import csv
 
-def gen_http_request( url, configs, data=""):
+def send_http_request( url,headers,data="",conf=""):
 
-    req = ""
-    auth_string = "%s:%s" % (configs['atlas_user'], configs['atlas_pass'])
-    auth_encoded = 'Basic %s' % base64.b64encode(auth_string).strip()
-    if data == "":
-        req = urllib2.Request(url)
-    else:
-        req = urllib2.Request(url,data=json.dumps(data))
-        #print(json.dumps(data))
-    req.add_header('Authorization', auth_encoded)
-    req.add_header('Content-Type', 'application/json')
-    req.add_header('charset', 'UTF-8')
-    req.add_header('Accept', 'application/json')
+    #auth_string = "%s:%s" % (conf['nifi_user'], conf['nifi_pass'])
+    #auth_encoded = 'Basic %s' % base64.b64encode(auth_string).strip()
+    if data != "":
+        jsondata = json.dumps(data).encode('utf-8')   # needs to be bytes
+    #    req.add_header('Content-Length', len(jsondata))
+    #req.add_header('Authorization', auth_encoded)
 
-    return req
-
-def send_http_request( req, timeout):
-
-    httpHandler = urllib2.HTTPHandler()
-    opener = urllib2.build_opener(httpHandler)
-    end = 0
-    start = 0
-    try:
-       start = time.time()
-       response = opener.open(req)
-       end = time.time()
-       print "Request to {} took {} seconds".format( req.get_full_url(), end - start)
-       return json.load(response)
-    except (urllib2.URLError, urllib2.HTTPError) as e:
-       print 'Error', e
-    except ValueError as e:
-       print("Empty response likely {}".format(response))
-       return response
+    response = requests.put(
+           url,
+           data = jsondata,
+           headers = headers
+           )
+    print(response)
 
 def set_controller_service_state( version, conf, headers, state):
 
+    print("Setting controller service id {} to state {}".format(conf['cs_id'],state))
     data_ = {
         "revision" : {
             "version" : version
@@ -59,13 +39,15 @@ def set_controller_service_state( version, conf, headers, state):
         data = data,
         headers = headers
         )
-    print(resp2.content)
+    # _ = input("Confirm state {} of controller_service id {}\n".format(state,conf['cs_id']))
+    # print(resp.content)
 
-def set_ref_component_runstate( csinfo, conf, headers, state):
+def set_ref_component_state( csinfo, conf, headers, state):
 
     for component in csinfo['component']['referencingComponents']:
         ver = component['revision']['version']
         ref_comp_id = component['id']
+        print("Setting component id {} to run state {}".format(ref_comp_id,state))
         data_ = {
             "id" : conf['cs_id'],
             "state" : state,
@@ -81,44 +63,30 @@ def set_ref_component_runstate( csinfo, conf, headers, state):
             data = data,
             headers = headers
             )
-        print(resp.content)
+        # print(resp.content)
+        #_ = input("Confirm run state {} for component id {}\n".format(state,ref_comp_id))
         time.sleep(10)
 
-def set_ref_component_state( conf, headers, state):
-
-    data_ = {
-        "id"  : conf['cs_id'],
-        "state"  : state,
-        "referencingComponentRevisions" : {}
-        }
-    data = json.dumps(data_)
-    resp = requests.put(
-        conf['ref_url'],
-        data = data,
-        headers = headers
-        )
-    print(resp.content)
-
-def set_controller_service_properties( conf, headers, change):
+def set_controller_service_properties( conf, headers ):
 
     ## Get json object by invoking REST URL.
     csinfo_ = requests.get(conf['base_url'])
     csinfo = csinfo_.json()
 
-    ## Update json object
+    ## Update json object as needed
     csinfo['component']['properties']['hive-db-connect-url'] = conf['hive-db-connect-url']
     csinfo['component']['properties']['Kerberos Principal'] =  conf['Kerberos Principal']
     csinfo['component']['properties']['Kerberos Keytab'] =  conf['Kerberos Keytab']
 
+    print("Setting controller service properties to {} ".format(csinfo['component']['properties']))
     ## Send POST request
-    req = gen_http_request( conf['base_url'])
-        resp = send_http_request( req, 20)
+    send_http_request( conf['base_url'], data=csinfo, headers=headers)
     return True
 
 def disable_all_dependencies(csinfo, conf, headers):
 
     # Stop referencing component
-    set_ref_component_runstate(
+    set_ref_component_state(
         csinfo = csinfo,
         conf = conf,
         headers = headers,
@@ -126,6 +94,7 @@ def disable_all_dependencies(csinfo, conf, headers):
 
     # Disable referencing component
     set_ref_component_state(
+        csinfo = csinfo,
         conf = conf,
         headers = headers,
         state = "DISABLED")
@@ -151,12 +120,13 @@ def start_all_dependencies( csinfo, conf, headers):
 
     # Enable referencing component
     set_ref_component_state(
+        csinfo = csinfo,
         conf = conf,
         headers = headers,
         state = "ENABLED")
 
     # Start referencing component
-    set_ref_component_runstate(
+    set_ref_component_state(
         csinfo = csinfo,
         conf = conf,
         headers = headers,
@@ -171,17 +141,17 @@ def main() :
 
     csv_file = 'kerberizeNiFi.csv'
     # Enter the Nifi URL
-    conf['nifi_url'] = 'http://10.10.10.10:9090'
+    conf['nifi_url'] = 'http://1.1.1.1:9090'
+    #conf['nifi_user'] = 'username'
+    #conf['nifi_pass'] = 'password'
 
-    headers = {
-            'Content-Type' : 'application/json',
-            'Accept' : '*/*'
-            }
+    headers = {}
+    headers['Content-Type'] = 'application/json'
+    headers['charset'] = 'UTF-8'
+    headers['Accept'] = '*/*'
+
 
     fieldnames = ['cs_id', 'hive-db-connect-url', 'Kerberos Principal', 'Kerberos Keytab']
-
-    # Enter UID for Controller Service
-    #conf['cs_id'] = 'e1495a25-0168-1000-0000-00000851f482'
 
     with open(csv_file, newline='') as f:
         reader = csv.DictReader(f, fieldnames=fieldnames)
@@ -195,8 +165,9 @@ def main() :
                   conf['cs_id']
                   )
 
-            ref_url = '{}/references'.format( conf['base_url'] )
+            conf['ref_url'] = '{}/references'.format( conf['base_url'] )
 
+            print(conf)
 
             # Obtain controller service related details and convert into dictionary
             csinfo_ = requests.get(conf['base_url'])
@@ -206,8 +177,11 @@ def main() :
             disable_status = disable_all_dependencies( csinfo, conf, headers )
 
             # Update controller service properties
-            set_controller_service_properties()
+            set_controller_service_properties( conf, headers=headers )
 
             # Start all services again
             start_status = start_all_dependencies( csinfo, conf, headers )
 
+
+if __name__ == "__main__":
+    main()
