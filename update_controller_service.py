@@ -1,7 +1,4 @@
-
-
 import time
-from getpass import getpass
 import requests
 import json
 import urllib
@@ -9,6 +6,9 @@ import urllib2
 import base64
 import csv
 import ssl
+
+from readconfig import get_config_params
+
 
 def send_http_request( url,headers,data="",conf=""):
 
@@ -249,31 +249,35 @@ def update_cs_properties(conf, csinstance, headers):
         print("Controller Service is not of type DRHiveConnectionPool. Skipping {}".format(conf['cs_id']))
     return True
 
-
-def main() :
-
-    conf = {}
-
-    csv_file = 'input.csv'
-    conf['nifi_url'] = 'https://NIFI.domain.com:9091'
-    conf['host'] = 'NIFI.domain.com'
-    conf['port'] = 9091
-    conf['nifi_user'] = 'admin'
-    conf['nifi_pass'] = getpass()
-
-    token = get_auth_token(conf)
-
-    headers = {}
+def set_http_headers(token=""):
+    
     headers['Content-Type'] = 'application/json'
     headers['charset'] = 'UTF-8'
     headers['Accept'] = '*/*'
-    headers['Authorization'] = token
+    if token != "":
+        headers['Authorization'] = token
+    
+    return headers
+    
 
+def main() :
+
+    csv_file = 'input.csv'
+    config_file = os.path.join(os.path.dirname(__file__), "../conf/config.ini")
+    conf = {}
+    conf = get_config_params(config_file)
+    
+    token = get_auth_token(conf)
+
+    headers = {}
+    headers = set_http_headers(token)
+    
     fieldnames = ['cs_id', 'hive-db-connect-url', 'Kerberos Principal', 'Kerberos Keytab']
 
     with open(csv_file) as f:
         reader = csv.DictReader(f, fieldnames=fieldnames)
         for row in reader:
+            print("Processing Controller Service id = {} ".format(row['cs_id']))
             update_cs_properties(conf=conf,csinstance=row,headers=headers)
 
 
